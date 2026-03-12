@@ -24,9 +24,9 @@ from torch.utils.data import DataLoader, TensorDataset
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.transformer import TransformerLM, TransformerConfig
-from src.generation.sampling import greedy_decode, sample_decode
-from src.utils.helpers import get_device
+from src.models.transformer import Transformer as TransformerLM, TransformerConfig
+from src.generation.sampling import generate, SamplingConfig
+from src.utils.device import get_device
 
 
 def parse_args():
@@ -111,7 +111,8 @@ def compute_perplexity(model, token_ids, seq_len, batch_size, device):
     with torch.no_grad():
         for xb, yb in loader:
             xb, yb = xb.to(device), yb.to(device)
-            logits = model(xb)
+            out = model(xb)
+            logits = out[0] if isinstance(out, tuple) else out
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 yb.view(-1),
@@ -135,15 +136,17 @@ def run_generation(model, encode, decode, prompts, cfg, args, device):
         print(f"\nPrompt: \"{prompt}\"")
 
         # Greedy
-        greedy_out = greedy_decode(model, prompt_ids, max_new_tokens=args.max_new_tokens)
+        greedy_cfg = SamplingConfig(max_new_tokens=args.max_new_tokens, do_sample=False)
+        greedy_out = generate(model, prompt_ids, greedy_cfg)
         greedy_text = decode(greedy_out[0, len(encode(prompt)):].tolist())
         print(f"  Greedy  : {greedy_text}")
 
         # Sampling
-        sample_out = sample_decode(
-            model, prompt_ids, max_new_tokens=args.max_new_tokens,
+        sample_cfg = SamplingConfig(
+            max_new_tokens=args.max_new_tokens, do_sample=True,
             temperature=args.temperature, top_k=args.top_k, top_p=args.top_p,
         )
+        sample_out = generate(model, prompt_ids, sample_cfg)
         sample_text = decode(sample_out[0, len(encode(prompt)):].tolist())
         print(f"  Sampled : {sample_text}")
 
@@ -178,9 +181,17 @@ def main():
         else:
             print(f"\nEvaluating on: {data_path}")
             text = data_path.read_text(encoding="utf-8")
-            encode, decode, vocab_size = build_char_tokenizer(text)
+            if args.tokenizer and Path(args.tokenizer).exists():
+                import sentencepiece as spm
+                sp = spm.SentencePieceProcessor()
+                sp.Load(args.tokenizer)
+                encode = lambda s: sp.EncodeAsIds(s)
+                decode = lambda ids: sp.DecodeIds(ids)
+                vocab_size = sp.GetPieceSize()
+            else:
+                encode, decode, vocab_size = build_char_tokenizer(text)
             token_ids = encode(text)
-            print(f"  Text length: {len(text):,} chars → {len(token_ids):,} tokens")
+            print(f"  Text length: {len(text):,} chars -> {len(token_ids):,} tokens")
 
             ppl = compute_perplexity(
                 model, token_ids, min(args.seq_len, cfg.max_seq_len),

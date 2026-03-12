@@ -48,60 +48,66 @@ def load_model(checkpoint_path, device):
     return model, cfg
 
 
-def get_char_tokenizer(cfg):
-    all_chars = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n"
-    chars = sorted(set(all_chars))
-    c2i = {c: i % cfg.vocab_size for i, c in enumerate(chars)}
-    encode = lambda s: [c2i.get(c, 0) for c in s]
-    return encode
+def get_tokenizer(checkpoint_path, cfg):
+    """Return (encode, token_fn) — SentencePiece if available, else char-level."""
+    tokenizer_path = Path(checkpoint_path).parent / "tokenizer.model"
+    if tokenizer_path.exists():
+        import sentencepiece as spm
+        sp = spm.SentencePieceProcessor()
+        sp.Load(str(tokenizer_path))
+        encode = lambda s: sp.EncodeAsIds(s)
+        tokens_to_labels = lambda ids, text: sp.IdToPiece(ids)
+    else:
+        all_chars = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n"
+        chars = sorted(set(all_chars))
+        c2i = {c: i % cfg.vocab_size for i, c in enumerate(chars)}
+        encode = lambda s: [c2i.get(c, 0) for c in s]
+        tokens_to_labels = None
+    return encode, tokens_to_labels
 
 
 def visualize_attention(model, cfg, text, layer_idx, args, device):
-    encode = get_char_tokenizer(cfg)
+    encode, tokens_to_labels = get_tokenizer(args.checkpoint, cfg)
     tokens = encode(text)
-    token_labels = list(text)
 
     # Clip to model max length
     if len(tokens) > cfg.max_seq_len:
         tokens = tokens[:cfg.max_seq_len]
-        token_labels = token_labels[:cfg.max_seq_len]
+
+    # Build per-token labels for axis ticks
+    if tokens_to_labels is not None:
+        import sentencepiece as spm
+        sp = spm.SentencePieceProcessor()
+        sp.Load(str(Path(args.checkpoint).parent / "tokenizer.model"))
+        token_labels = [sp.IdToPiece(t).replace('\u2581', '_') for t in tokens]
+    else:
+        token_labels = list(text[:len(tokens)])
 
     x = torch.tensor([tokens], device=device)
 
-    # Hook to capture attention weights
-    captured = {}
-
-    def make_hook(name):
-        def hook(module, input, output):
-            if hasattr(module, '_attention_weights') and module._attention_weights is not None:
-                captured[name] = module._attention_weights.cpu()
-        return hook
-
-    handles = []
-    for i, block in enumerate(model.blocks):
-        attn_module = getattr(block, 'attn', getattr(block, 'self_attn', None))
-        if attn_module is not None:
-            h = attn_module.register_forward_hook(make_hook(f'block_{i}'))
-            handles.append(h)
+    # Run forward pass, then read attention weights via get_attention_weights()
+    layers = getattr(model, 'layers', getattr(model, 'blocks', []))
+    n_layers = len(layers)
 
     with torch.no_grad():
         _ = model(x)
 
-    for h in handles:
-        h.remove()
+    if layer_idx >= n_layers:
+        print(f"Layer {layer_idx} out of range (model has {n_layers} layers). Using layer 0.")
+        layer_idx = 0
 
-    key = f'block_{layer_idx}'
-    if key not in captured:
-        available = list(captured.keys())
-        print(f"No attention weights captured for layer {layer_idx}.")
-        print(f"Available layers: {available}")
-        if not available:
-            print("The model's attention modules may not expose _attention_weights.")
-            return
-        key = available[0]
-        print(f"Using {key} instead.")
+    attn_module = getattr(layers[layer_idx], 'attention',
+                  getattr(layers[layer_idx], 'attn', None))
+    if attn_module is None or not hasattr(attn_module, 'get_attention_weights'):
+        print("Attention module does not expose get_attention_weights().")
+        return
 
-    weights = captured[key][0]  # (n_heads, seq, seq)
+    weights = attn_module.get_attention_weights()
+    if weights is None:
+        print("No attention weights available — forward pass may not have stored them.")
+        return
+
+    weights = weights[0].cpu()  # (n_heads, seq, seq)
     n_heads = weights.shape[0]
     seq_len = len(token_labels)
     weights = weights[:, :seq_len, :seq_len]
@@ -134,7 +140,7 @@ def visualize_attention(model, cfg, text, layer_idx, args, device):
     for h in range(n_heads, n_rows * n_cols):
         axes[h // n_cols][h % n_cols].set_visible(False)
 
-    layer_name = key.replace('_', ' ').title()
+    layer_name = f"Layer {layer_idx}"
     fig.suptitle(
         f'Attention Weights — {layer_name}\n"{text[:50]}{"..." if len(text) > 50 else ""}"',
         fontsize=11, y=1.01

@@ -205,7 +205,7 @@ def main():
         r = benchmark_generation(model, plen, args.gen_tokens, max(1, args.n_runs // 4), args.warmup, device)
         gen_results.append(r)
         print(
-            f"  Prompt={plen:>4} → {args.gen_tokens} tokens: "
+            f"  Prompt={plen:>4} -> {args.gen_tokens} tokens: "
             f"{r['tok_per_sec']:>8.1f} tok/s  ({r['ms_per_token']:.1f} ms/tok)"
         )
 
