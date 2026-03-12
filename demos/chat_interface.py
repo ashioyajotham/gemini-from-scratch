@@ -23,9 +23,9 @@ import torch
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.transformer import TransformerLM, TransformerConfig
-from src.generation.sampling import sample_decode, greedy_decode
-from src.utils.helpers import get_device
+from src.models.transformer import Transformer as TransformerLM, TransformerConfig
+from src.generation.sampling import generate, SamplingConfig
+from src.utils.device import get_device
 
 
 def parse_args():
@@ -57,13 +57,22 @@ def load_model(checkpoint_path: str, device: torch.device):
     model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
     model.eval()
 
-    # Build char tokenizer (fallback when no tokenizer file)
-    all_chars = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n"
-    chars = sorted(set(all_chars))
-    c2i = {c: i % cfg.vocab_size for i, c in enumerate(chars)}
-    i2c = {i: c for c, i in c2i.items()}
-    encode = lambda s: [c2i.get(c, 0) for c in s]
-    decode = lambda ids: "".join(i2c.get(i % len(i2c), "") for i in ids)
+    # Try SentencePiece tokenizer co-located with the checkpoint
+    tokenizer_path = path.parent / "tokenizer.model"
+    if tokenizer_path.exists():
+        import sentencepiece as spm
+        sp = spm.SentencePieceProcessor()
+        sp.Load(str(tokenizer_path))
+        encode = lambda s: sp.EncodeAsIds(s)
+        decode = lambda ids: sp.DecodeIds(ids)
+    else:
+        # Fallback char tokenizer
+        all_chars = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n"
+        chars = sorted(set(all_chars))
+        c2i = {c: i % cfg.vocab_size for i, c in enumerate(chars)}
+        i2c = {i: c for c, i in c2i.items()}
+        encode = lambda s: [c2i.get(c, 0) for c in s]
+        decode = lambda ids: "".join(i2c.get(i % len(i2c), "") for i in ids)
 
     return model, cfg, encode, decode
 
@@ -137,17 +146,15 @@ def main():
         prompt_tensor = torch.tensor([prompt_ids], device=device)
 
         print("Model: ", end="", flush=True)
+        cfg_gen = SamplingConfig(
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature if not args.greedy else 1.0,
+            top_k=args.top_k if not args.greedy else 0,
+            top_p=args.top_p if not args.greedy else 1.0,
+            do_sample=not args.greedy,
+        )
         with torch.no_grad():
-            if args.greedy:
-                out = greedy_decode(model, prompt_tensor, max_new_tokens=args.max_new_tokens)
-            else:
-                out = sample_decode(
-                    model, prompt_tensor,
-                    max_new_tokens=args.max_new_tokens,
-                    temperature=args.temperature,
-                    top_k=args.top_k,
-                    top_p=args.top_p,
-                )
+            out = generate(model, prompt_tensor, cfg_gen)
 
         generated_ids = out[0, len(prompt_ids):].tolist()
         response = decode(generated_ids).strip()

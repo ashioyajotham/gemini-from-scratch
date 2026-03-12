@@ -22,8 +22,8 @@ import matplotlib.gridspec as gridspec
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.transformer import TransformerLM, TransformerConfig
-from src.utils.helpers import get_device
+from src.models.transformer import Transformer as TransformerLM, TransformerConfig
+from src.utils.device import get_device
 
 
 def parse_args():

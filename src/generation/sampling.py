@@ -284,10 +284,18 @@ def generate(
     # Track which sequences are done
     done = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
+    # Infer the model's max sequence length so we can truncate the context
+    _max_seq_len = getattr(getattr(model, "config", None), "max_seq_len", None)
+
     # Generate tokens
     for step in range(config.max_new_tokens):
+        # Truncate to the model's context window to avoid mask size errors
+        model_input = input_ids
+        if _max_seq_len is not None and model_input.size(1) > _max_seq_len:
+            model_input = model_input[:, -_max_seq_len:]
+
         # Get logits for the last position
-        outputs = model(input_ids)
+        outputs = model(model_input)
         if isinstance(outputs, tuple):
             logits = outputs[0]
         else:
