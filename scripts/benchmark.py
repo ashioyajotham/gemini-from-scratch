@@ -21,8 +21,8 @@ import torch.nn as nn
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.transformer import TransformerLM, TransformerConfig
-from src.utils.helpers import get_device
+from src.models.transformer import Transformer as TransformerLM, TransformerConfig
+from src.utils.device import get_device
 
 
 def parse_args():
@@ -127,12 +127,14 @@ def benchmark_throughput(model, batch_size, seq_len, n_runs, warmup, device):
 def benchmark_generation(model, prompt_len, gen_tokens, n_runs, warmup, device):
     """Measure autoregressive generation speed (tokens/sec)."""
     prompt = torch.randint(0, 100, (1, prompt_len), device=device)
+    _max_seq = getattr(getattr(model, "config", None), "max_seq_len", 512)
 
     def generate_naive(n):
         ids = prompt.clone()
         with torch.no_grad():
             for _ in range(n):
-                logits = model(ids[:, -512:])[:, -1, :]
+                out = model(ids[:, -_max_seq:])
+                logits = (out[0] if isinstance(out, tuple) else out)[:, -1, :]
                 next_t = logits.argmax(-1, keepdim=True)
                 ids = torch.cat([ids, next_t], dim=1)
         return ids
@@ -160,7 +162,7 @@ def benchmark_generation(model, prompt_len, gen_tokens, n_runs, warmup, device):
 def print_throughput_table(results):
     header = f"{'Batch':>6} {'SeqLen':>8} {'Tok/s':>12} {'Latency(ms)':>13} {'PeakMem(MB)':>13}"
     print(header)
-    print("─" * len(header))
+    print("-" * len(header))
     for r in results:
         if r is None:
             continue
@@ -187,8 +189,8 @@ def main():
 
     model = build_model(args, device)
 
-    # ── Forward pass throughput ────────────────────────────────────────────
-    print("\nForward Pass Throughput\n" + "─" * 60)
+    # -- Forward pass throughput --------------------------------------------
+    print("\nForward Pass Throughput\n" + "-" * 60)
     throughput_results = []
     for bs in args.batch_sizes:
         for sl in args.seq_lengths:
@@ -198,8 +200,8 @@ def main():
 
     print_throughput_table(throughput_results)
 
-    # ── Generation latency ────────────────────────────────────────────────
-    print("\n\nAutoregressive Generation Latency\n" + "─" * 60)
+    # -- Generation latency ------------------------------------------------
+    print("\n\nAutoregressive Generation Latency\n" + "-" * 60)
     gen_results = []
     for plen in [8, 32, 128]:
         r = benchmark_generation(model, plen, args.gen_tokens, max(1, args.n_runs // 4), args.warmup, device)
@@ -209,8 +211,8 @@ def main():
             f"{r['tok_per_sec']:>8.1f} tok/s  ({r['ms_per_token']:.1f} ms/tok)"
         )
 
-    # ── Memory footprint ─────────────────────────────────────────────────
-    print("\n\nMemory Footprint\n" + "─" * 60)
+    # -- Memory footprint -------------------------------------------------
+    print("\n\nMemory Footprint\n" + "-" * 60)
     param_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
     buffer_bytes = sum(b.numel() * b.element_size() for b in model.buffers())
     print(f"  Parameters : {param_bytes / 1e6:.1f} MB (fp32)")
@@ -219,9 +221,9 @@ def main():
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Total params: {n_params:,}")
 
-    # ── Optional profiler ─────────────────────────────────────────────────
+    # -- Optional profiler -------------------------------------------------
     if args.profile and device.type == "cuda":
-        print("\n\nPyTorch Profiler (top ops by CUDA time)\n" + "─" * 60)
+        print("\n\nPyTorch Profiler (top ops by CUDA time)\n" + "-" * 60)
         x = torch.randint(0, 100, (4, 128), device=device)
         with torch.profiler.profile(
             activities=[
@@ -237,7 +239,7 @@ def main():
 
         print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=15))
 
-    # ── Save results ──────────────────────────────────────────────────────
+    # -- Save results ------------------------------------------------------
     all_results = {
         "device": str(device),
         "n_params": n_params,
