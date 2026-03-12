@@ -86,31 +86,41 @@ ipython_config.py
 dmypy.json
 
 # Project specific
-checkpoints/
-!checkpoints/.gitkeep
-data/
-!data/.gitkeep
+checkpoints/**/*.pt
+checkpoints/**/*.pth
+checkpoints/**/*.ckpt
+!checkpoints/pretrained/.gitkeep
+!checkpoints/workshop/.gitkeep
+data/raw/
+data/processed/
+data/vocab/
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/vocab/.gitkeep
+# keep samples in git (small enough)
+data/samples/*.txt
+!data/samples/.gitkeep
 logs/
 wandb/
-outputs/
+outputs/logs/
+outputs/visualizations/
+outputs/generated_text/
+!outputs/logs/.gitkeep
+!outputs/visualizations/.gitkeep
+!outputs/generated_text/.gitkeep
 
-# Model files
-*.pt
-*.pth
-*.ckpt
+# Standalone model/tokenizer files at root level
 *.bin
 *.safetensors
 
-# Tokenizer models
+# Tokenizer model files
 *.model
 *.vocab
 
-# Large data files
+# Large data files (top-level; configs are YAML not JSON)
 *.csv
-*.json
 *.jsonl
 *.parquet
-!configs/*.yaml
 
 # OS specific
 .DS_Store
