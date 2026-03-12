@@ -91,7 +91,7 @@ def write_text_file(path: Path, texts: list, max_examples: int = None):
         texts = texts[:max_examples]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(t.strip() for t in texts if t.strip()))
-    print(f"  Wrote {len(texts):,} examples → {path}")
+    print(f"  Wrote {len(texts):,} examples -> {path}")
     size_mb = path.stat().st_size / 1e6
     print(f"  File size: {size_mb:.1f} MB")
 
