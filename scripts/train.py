@@ -144,12 +144,18 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load or create training data
+    sample_data_path = Path("data/samples/sample_stories.txt")
     if args.data and Path(args.data).exists():
         logger.info(f"Loading data from {args.data}")
         with open(args.data, "r", encoding="utf-8") as f:
             texts = [f.read()]
+    elif sample_data_path.exists():
+        logger.info(f"Loading sample data from {sample_data_path}")
+        with open(sample_data_path, "r", encoding="utf-8") as f:
+            texts = f.read().splitlines()
+        texts = [t for t in texts if t.strip()]
     else:
-        logger.info("Using sample training data")
+        logger.info("Using built-in sample training data")
         texts = create_sample_data()
 
     # Load or create tokenizer

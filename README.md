@@ -393,8 +393,11 @@ geminiq/
 │
 ├── scripts/
 │   ├── train.py                  # Training entry point
+│   ├── evaluate.py               # Perplexity + generation eval
+│   ├── benchmark.py              # Throughput, latency, memory
 │   ├── generate.py               # Text generation
 │   ├── chat.py                   # Interactive chat
+│   ├── download_data.py          # Dataset downloader
 │   └── verify_setup.py           # Installation check
 │
 └── tests/                        # 146 unit tests
@@ -424,19 +427,120 @@ pip install -e .
 python scripts/verify_setup.py
 ```
 
+### Downloading Data
+
+```bash
+# Download TinyStories (small subset, good for CPU)
+python scripts/download_data.py --dataset tinystories --size small
+
+# Download larger slice for real training
+python scripts/download_data.py --dataset tinystories --size medium
+```
+
+If HuggingFace is unreachable, the script falls back to a local sample dataset in `data/samples/`.
+
 ### Training
 
 ```bash
 # Train a small model (CPU-friendly)
 python scripts/train.py --config configs/small_model.yaml
 
-# Train with custom settings
-python scripts/train.py \
-    --config configs/medium_model.yaml \
-    --batch_size 16 \
+# Point at your own data file
+python scripts/train.py --config configs/small_model.yaml \
+    --data data/raw/tinystories_small.txt
+
+# Quick experiment — override key hyperparameters without editing YAML
+python scripts/train.py --config configs/small_model.yaml \
+    --max_steps 500 \
     --learning_rate 1e-4 \
-    --max_steps 50000
+    --batch_size 16
+
+# Resume from a checkpoint
+python scripts/train.py --config configs/small_model.yaml \
+    --resume checkpoints/checkpoint_step1000.pt
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `configs/small_model.yaml` | Path to YAML config |
+| `--data` | *(sample data)* | Path to training text file |
+| `--tokenizer` | *(train new)* | Path to existing `.model` tokenizer |
+| `--output_dir` | `checkpoints` | Directory to save checkpoints |
+| `--max_steps` | *(from config)* | Override training step count |
+| `--learning_rate` | *(from config)* | Override learning rate |
+| `--batch_size` | *(from config)* | Override batch size |
+| `--resume` | — | Checkpoint path to resume from |
+| `--seed` | `42` | Random seed |
+
+> **CPU tip:** Set `--max_steps 500` for a quick smoke-test run; a full 10k-step run on CPU takes many hours.
+
+### Evaluation
+
+```bash
+# Compute perplexity on a validation file
+python scripts/evaluate.py \
+    --checkpoint checkpoints/model.pt \
+    --data data/raw/tinystories_val.txt
+
+# Run generation samples from prompts
+python scripts/evaluate.py \
+    --checkpoint checkpoints/model.pt \
+    --prompts "Once upon a time" "The little robot"
+
+# Save results to JSON
+python scripts/evaluate.py \
+    --checkpoint checkpoints/model.pt \
+    --data data/raw/val.txt \
+    --output results/eval.json
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--checkpoint` | *(required)* | Path to trained model `.pt` |
+| `--data` | — | Evaluation text file (for perplexity) |
+| `--tokenizer` | — | Path to tokenizer `.model` (auto-detected from checkpoint dir) |
+| `--prompts` | — | One or more text prompts for generation |
+| `--max_new_tokens` | `100` | Tokens to generate per prompt |
+| `--temperature` | `0.8` | Sampling temperature |
+| `--top_k` | `40` | Top-K sampling cutoff |
+| `--top_p` | `0.9` | Nucleus sampling probability |
+| `--batch_size` | `32` | Batch size for perplexity evaluation |
+| `--seq_len` | `512` | Sequence length for evaluation |
+| `--device` | *(auto)* | Force device: `cuda`, `cpu`, `mps` |
+| `--output` | — | Save JSON results to this path |
+
+### Benchmarking
+
+```bash
+# Benchmark throughput and latency from config
+python scripts/benchmark.py --config configs/small_model.yaml
+
+# Benchmark a trained checkpoint
+python scripts/benchmark.py --checkpoint checkpoints/model.pt
+
+# Custom batch sizes and sequence lengths
+python scripts/benchmark.py --config configs/small_model.yaml \
+    --batch_sizes 1 8 32 \
+    --seq_lengths 128 512
+
+# Run with PyTorch profiler and save results
+python scripts/benchmark.py --config configs/small_model.yaml \
+    --profile \
+    --output results/benchmark.json
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `configs/small_model.yaml` | Config to build model from |
+| `--checkpoint` | — | Checkpoint to benchmark instead |
+| `--batch_sizes` | `1 4 16 32` | Batch sizes to sweep |
+| `--seq_lengths` | `64 128 256 512` | Sequence lengths to sweep |
+| `--n_runs` | `20` | Total runs (warmup + timed) |
+| `--warmup` | `5` | Warmup runs excluded from timing |
+| `--gen_tokens` | `50` | Tokens to generate for latency test |
+| `--profile` | `false` | Enable PyTorch profiler |
+| `--device` | *(auto)* | Force device: `cuda`, `cpu`, `mps` |
+| `--output` | — | Save JSON results to this path |
 
 ### Generation
 

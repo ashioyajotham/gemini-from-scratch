@@ -92,6 +92,8 @@ class BPETokenizer:
             vocab_size=vocab_size,
             character_coverage=character_coverage,
             model_type=model_type,
+            max_sentence_length=16384,
+            hard_vocab_limit=False,
             pad_id=0,
             unk_id=1,
             bos_id=2,
