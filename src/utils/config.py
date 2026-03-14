@@ -68,7 +68,7 @@ def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, A
 class ModelConfig:
     """Configuration for transformer model architecture."""
 
-    vocab_size: int = 8000
+    vocab_size: int = 512
     d_model: int = 256
     n_heads: int = 4
     n_layers: int = 4
