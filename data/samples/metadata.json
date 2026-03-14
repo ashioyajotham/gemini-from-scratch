@@ -1,0 +1,5 @@
+{
+  "dataset": "sample",
+  "n_examples": 1000,
+  "description": "Built-in sample stories for testing (no download required)"
+}
